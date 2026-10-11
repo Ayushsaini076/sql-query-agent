@@ -1,0 +1,20 @@
+# Render Blueprint: New > Blueprint > select this repository.
+services:
+  - type: web
+    name: sql-query-agent
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # To switch providers, change LLM_PROVIDER to "gemini" in the Render dashboard (models use per-provider defaults).
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false            # set the secret in the Render dashboard
+      - key: GEMINI_API_KEY
+        sync: false            # optional backup provider
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "20"
+      - key: TRUSTED_PROXY_HOPS   # Render's proxy appends the real client IP to X-Forwarded-For
+        value: "1"

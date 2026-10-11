@@ -1,0 +1,60 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	guard_input(guard_input)
+	classify_intent(classify_intent)
+	check_user_sql(check_user_sql)
+	retrieve_schema(retrieve_schema)
+	generate_sql(generate_sql)
+	debug_sql(debug_sql)
+	optimize_sql(optimize_sql)
+	load_user_sql(load_user_sql)
+	validate_sql(validate_sql)
+	analyze_sql(analyze_sql)
+	execute_sql(execute_sql)
+	generate_explanation(generate_explanation)
+	respond(respond)
+	refuse(refuse)
+	clarify(clarify)
+	answer_question(answer_question)
+	fail(fail)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> guard_input;
+	analyze_sql --> execute_sql;
+	check_user_sql -.-> refuse;
+	check_user_sql -.-> retrieve_schema;
+	classify_intent -.-> answer_question;
+	classify_intent -.-> check_user_sql;
+	classify_intent -.-> clarify;
+	classify_intent -.-> refuse;
+	classify_intent -.-> retrieve_schema;
+	debug_sql --> validate_sql;
+	execute_sql --> generate_explanation;
+	generate_explanation --> respond;
+	generate_sql -.-> clarify;
+	generate_sql -.-> validate_sql;
+	guard_input -.-> classify_intent;
+	guard_input -.-> refuse;
+	load_user_sql --> validate_sql;
+	optimize_sql --> validate_sql;
+	retrieve_schema -.-> debug_sql;
+	retrieve_schema -.-> generate_sql;
+	retrieve_schema -.-> load_user_sql;
+	retrieve_schema -.-> optimize_sql;
+	validate_sql -.-> analyze_sql;
+	validate_sql -.-> debug_sql;
+	validate_sql -.-> fail;
+	validate_sql -.-> generate_sql;
+	validate_sql -.-> optimize_sql;
+	answer_question --> __end__;
+	clarify --> __end__;
+	fail --> __end__;
+	refuse --> __end__;
+	respond --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
