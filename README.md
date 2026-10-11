@@ -158,14 +158,14 @@ docker compose up --build       # http://localhost:8000, reads backend/.env
 **Tests** (no API key needed; the LLM is replaced by a scripted fake):
 
 ```bash
-cd backend && pytest            # 115 tests: validator, executor, guards, retrieval, analyzer, graph flows, API/SSE
+cd backend && pytest            # 123 tests: validator, executor, guards, retrieval, analyzer, graph flows, API/SSE
 ```
 
 ### Deploy to Render
 
 1. Push the repository to GitHub.
 2. In Render choose **New → Blueprint**, select the repo, and Render reads [`render.yaml`](render.yaml).
-3. Set `GROQ_API_KEY` (and optionally `GEMINI_API_KEY` as a backup) when prompted, then deploy. The Docker image builds the frontend, installs the backend, and seeds the database. To switch providers later, change `LLM_PROVIDER` in the Render dashboard.
+3. Set `GROQ_API_KEY` (and optionally `GEMINI_API_KEY`, which turns on the automatic Gemini fallback) when prompted, then deploy. The Docker image builds the frontend, installs the backend, and seeds the database. To switch providers later, change `LLM_PROVIDER` in the Render dashboard.
 
 The free instance (512 MB RAM, 0.1 CPU) sleeps after 15 minutes without traffic and takes about a minute to wake, and its disk resets on every restart, so the server forgets conversation context for follow-ups. Before a demo, open the URL a couple of minutes early; a free uptime monitor pinging `/api/health` every 10 minutes keeps it awake (one always-on service fits in the 750 free hours a month).
 
@@ -176,6 +176,7 @@ The free instance (512 MB RAM, 0.1 CPU) sleeps after 15 minutes without traffic 
 | `LLM_PROVIDER` | `anthropic` | Any provider supported by LangChain `init_chat_model` (`anthropic`, `openai`, `google_genai`, `groq`, …); `gemini` is an alias for `google_genai` |
 | `LLM_MODEL` | `claude-opus-5-5` (`gpt-4.1` for OpenAI, `gemini-3.8-flash` for Gemini, `openai/gpt-oss-120b` for Groq) | Model for SQL generation, debugging and optimization |
 | `LLM_FAST_MODEL` | same as `LLM_MODEL` (`gemini-3.5-flash-lite` for Gemini, `openai/gpt-oss-20b` for Groq) | Optional cheaper model for routing and explanations |
+| `LLM_FALLBACK_PROVIDER` | — | Backup provider (e.g. `gemini`) that automatically retries any call the primary fails, using its default models; needs its API key |
 | `LLM_EFFORT` / `LLM_FAST_EFFORT` | `medium` / `low` | Claude effort, Gemini 3+ `thinking_level` or Groq gpt-oss `reasoning_effort`, for the two model roles |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) / `GROQ_API_KEY` | — | Provider credentials |
 | `MAX_SQL_ATTEMPTS` | `3` | Generation + self-correction rounds |

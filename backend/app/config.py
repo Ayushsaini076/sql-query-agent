@@ -25,6 +25,13 @@ DEFAULT_FAST_MODELS = {
 }
 # Friendly names accepted for LLM_PROVIDER, mapped to init_chat_model provider ids.
 PROVIDER_ALIASES = {"gemini": "google_genai", "google": "google_genai"}
+# Settings field holding each provider's API key; other providers read their own env vars.
+API_KEY_FIELDS = {
+    "anthropic": "anthropic_api_key",
+    "openai": "openai_api_key",
+    "google_genai": "google_api_key",
+    "groq": "groq_api_key",
+}
 
 
 class Settings(BaseSettings):
@@ -37,6 +44,9 @@ class Settings(BaseSettings):
     llm_effort: str | None = "medium"  # Claude effort / Gemini 3+ thinking_level / Groq reasoning_effort
     llm_fast_effort: str | None = "low"  # effort for routing / explanation calls
     llm_timeout_s: float = 60.0
+    # Backup provider tried when a call to the primary one fails (rate limit, timeout, outage).
+    # It always uses its DEFAULT_MODELS / DEFAULT_FAST_MODELS and is skipped if its API key is missing.
+    llm_fallback_provider: str | None = None
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
     google_api_key: str | None = Field(default=None, validation_alias=AliasChoices("google_api_key", "gemini_api_key"))
@@ -61,11 +71,11 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["http://localhost:5173"]
     static_dir: Path = BACKEND_DIR / "static"
 
-    @field_validator("llm_provider")
+    @field_validator("llm_provider", "llm_fallback_provider")
     @classmethod
-    def _normalize_provider(cls, value: str) -> str:
-        value = value.strip().lower()
-        return PROVIDER_ALIASES.get(value, value)
+    def _normalize_provider(cls, value: str | None) -> str | None:
+        value = (value or "").strip().lower()
+        return PROVIDER_ALIASES.get(value, value) or None
 
     @property
     def resolved_model(self) -> str:
@@ -75,17 +85,24 @@ class Settings(BaseSettings):
     def resolved_fast_model(self) -> str:
         return self.llm_fast_model or DEFAULT_FAST_MODELS.get(self.llm_provider) or self.resolved_model
 
+    def fallback_model(self, *, fast: bool = False) -> str:
+        provider = self.llm_fallback_provider or ""
+        return (fast and DEFAULT_FAST_MODELS.get(provider)) or DEFAULT_MODELS.get(provider, "")
+
+    def has_credentials(self, provider: str) -> bool:
+        field = API_KEY_FIELDS.get(provider)
+        return bool(getattr(self, field)) if field else True  # other providers: trust their own env vars
+
     @property
     def llm_configured(self) -> bool:
-        if self.llm_provider == "anthropic":
-            return bool(self.anthropic_api_key)
-        if self.llm_provider == "openai":
-            return bool(self.openai_api_key)
-        if self.llm_provider == "google_genai":
-            return bool(self.google_api_key)
-        if self.llm_provider == "groq":
-            return bool(self.groq_api_key)
-        return bool(self.resolved_model)  # other providers: trust their own env vars
+        return self.has_credentials(self.llm_provider) and bool(self.resolved_model)
+
+    @property
+    def fallback_configured(self) -> bool:
+        provider = self.llm_fallback_provider
+        return bool(
+            provider and provider != self.llm_provider and self.has_credentials(provider) and self.fallback_model()
+        )
 
 
 @lru_cache

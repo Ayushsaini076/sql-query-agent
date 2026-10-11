@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
 from app.agent.graph import NODE_LABELS, build_graph
-from app.agent.llm import create_chat_model, message_text
+from app.agent.llm import create_models, message_text
 from app.agent.nodes import SQLAgentNodes
 from app.agent.state import new_turn
 from app.config import Settings, get_settings
@@ -68,8 +68,7 @@ def create_app(settings: Settings | None = None, *, llm=None, fast_llm=None) -> 
         db = ReadOnlyDatabase(settings.database_path, timeout_s=settings.query_timeout_s)
         main_llm, router_llm = llm, fast_llm
         if main_llm is None and settings.llm_configured:
-            main_llm = create_chat_model(settings)
-            router_llm = create_chat_model(settings, fast=True)
+            main_llm, router_llm = create_models(settings)
         app.state.catalog = catalog
         app.state.llm_ready = main_llm is not None
         settings.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +119,7 @@ def create_app(settings: Settings | None = None, *, llm=None, fast_llm=None) -> 
             "llm_ready": request.app.state.llm_ready,
             "provider": settings.llm_provider,
             "model": settings.resolved_model,
+            "fallback_provider": settings.llm_fallback_provider if settings.fallback_configured else None,
         }
 
     @app.get("/api/schema")

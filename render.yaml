@@ -13,7 +13,9 @@ services:
       - key: GROQ_API_KEY
         sync: false            # set the secret in the Render dashboard
       - key: GEMINI_API_KEY
-        sync: false            # optional backup provider
+        sync: false            # optional: enables the automatic fallback below
+      - key: LLM_FALLBACK_PROVIDER   # used automatically when a Groq call fails (e.g. rate limit)
+        value: gemini
       - key: RATE_LIMIT_PER_MINUTE
         value: "20"
       - key: TRUSTED_PROXY_HOPS   # Render's proxy appends the real client IP to X-Forwarded-For

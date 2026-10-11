@@ -1,12 +1,17 @@
 import pytest
 
-from app.agent.llm import create_chat_model
+from langchain_core.messages import HumanMessage
+
+from app.agent.llm import FallbackLLM, create_chat_model, create_models, structured_call
+from app.agent.models import SQLDraft
 from app.config import Settings
+from tests.fakes import ScriptedLLM
 
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in ("LLM_PROVIDER", "LLM_MODEL", "LLM_FAST_MODEL", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+    for name in ("LLM_PROVIDER", "LLM_MODEL", "LLM_FAST_MODEL", "LLM_FALLBACK_PROVIDER",
+                 "GOOGLE_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -61,3 +66,68 @@ def test_groq_chat_models_use_reasoning_effort():
 def test_groq_non_gpt_oss_skips_reasoning_effort():
     settings = Settings(_env_file=None, llm_provider="groq", groq_api_key="k", llm_model="qwen/qwen3.8-27b")
     assert create_chat_model(settings).reasoning_effort is None
+
+
+def _groq_with_gemini_fallback(**overrides):
+    values = dict(llm_provider="groq", groq_api_key="g", llm_fallback_provider="gemini", google_api_key="k")
+    return Settings(_env_file=None, **(values | overrides))
+
+
+def test_fallback_uses_its_own_default_models():
+    settings = _groq_with_gemini_fallback(llm_model="openai/gpt-oss-120b")
+    assert settings.llm_fallback_provider == "google_genai"
+    assert settings.fallback_configured
+    assert settings.fallback_model() == "gemini-3.8-flash"
+    assert settings.fallback_model(fast=True) == "gemini-3.5-flash-lite"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"google_api_key": None},  # no key for the fallback provider
+    {"llm_fallback_provider": "groq"},  # same as the primary
+    {"llm_fallback_provider": ""},  # unset
+])
+def test_fallback_not_configured(overrides):
+    assert not _groq_with_gemini_fallback(**overrides).fallback_configured
+
+
+def test_create_models_wraps_both_roles():
+    main, fast = create_models(_groq_with_gemini_fallback())
+    assert isinstance(main, FallbackLLM) and isinstance(fast, FallbackLLM)
+    assert (main.primary.model_name, main.fallback.model) == ("openai/gpt-oss-120b", "gemini-3.8-flash")
+    assert (fast.primary.model_name, fast.fallback.model) == ("openai/gpt-oss-20b", "gemini-3.5-flash-lite")
+
+
+def test_create_models_without_fallback_returns_plain_models():
+    main, _ = create_models(_groq_with_gemini_fallback(google_api_key=None))
+    assert not isinstance(main, FallbackLLM)
+
+
+class _FailingLLM:
+    """Stands in for a provider that is rate-limiting every call."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def with_structured_output(self, *_, **__):
+        return self
+
+    def invoke(self, *_, **__):
+        self.calls += 1
+        raise RuntimeError("RateLimitError: 429 Too Many Requests")
+
+
+def test_fallback_answers_when_primary_fails():
+    draft = SQLDraft(sql="SELECT 1", assumptions=[], unanswerable_reason=None)
+    primary, backup = _FailingLLM(), ScriptedLLM({SQLDraft: [draft]}, text=["Backup explanation."])
+    llm = FallbackLLM(primary, backup, "google_genai")
+    messages = [HumanMessage("hi")]
+    assert structured_call(llm, SQLDraft, messages, "groq") == draft
+    assert llm.invoke(messages).content == "Backup explanation."
+    assert primary.calls == 2
+
+
+def test_fallback_unused_when_primary_succeeds():
+    draft = SQLDraft(sql="SELECT 1", assumptions=[], unanswerable_reason=None)
+    primary, backup = ScriptedLLM({SQLDraft: [draft]}), ScriptedLLM()
+    assert structured_call(FallbackLLM(primary, backup, "google_genai"), SQLDraft, [HumanMessage("hi")], "groq") == draft
+    assert backup.calls == []
