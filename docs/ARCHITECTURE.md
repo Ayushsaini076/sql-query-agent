@@ -32,7 +32,9 @@ SSE event types:
 
 **LLM for language, code for guarantees.** The model routes, writes, diagnoses and explains. Everything that has to *always* hold (read-only, existing names, a valid join graph, compilable SQL, bounded execution) is enforced by deterministic nodes the model cannot skip, because the graph only reaches `respond` through `validate_sql`.
 
-**Structured output everywhere.** Every LLM decision is a Pydantic schema (`IntentDecision`, `SQLDraft`, `DebugResult`, `OptimizationResult`) sent as native JSON-schema structured output. Current Claude models reject forced tool choice, so the tool-calling path is used only for other providers. All fields are required, with nullable values where needed, so the same schemas also work under OpenAI's strict mode.
+**Structured output everywhere.** Every LLM decision is a Pydantic schema (`IntentDecision`, `SQLDraft`, `DebugResult`, `OptimizationResult`) sent as native JSON-schema structured output. Current Claude models reject forced tool choice, so the tool-calling path is used only for providers without native support. Gemini receives the schema as `response_json_schema`, and Groq's gpt-oss models get it with `strict: true` (constrained decoding). All fields are required, with nullable values where needed, so the same schemas also work under OpenAI's and Groq's strict modes.
+
+**Provider-agnostic models with fallback.** `create_models()` in `backend/app/agent/llm.py` builds the main model (SQL generation, debugging, optimization, schema questions) and the fast model (routing, explanations) through LangChain's `init_chat_model`, with per-provider defaults and effort settings (Claude `effort`, Gemini 3+ `thinking_level`, Groq gpt-oss `reasoning_effort`). When `LLM_FALLBACK_PROVIDER` is set and its API key is present, each model is wrapped in a `FallbackLLM`: any failed call (rate limit, timeout, outage, rejected key) is retried once on the fallback provider's default model, using that provider's structured-output method, and a warning is logged. Nodes are unaware of the wrapper because they only call `structured_call()` and `invoke()`. `/api/health` reports the active fallback provider.
 
 **Self-correction with precise feedback.** The validator's messages are written for the model: they say what is wrong and what exists instead ("Column 'FirstNam' does not exist… Did you mean Employees.FirstName?… Columns available: …"). After a name-resolution error, the retry also sees the full schema instead of only the retrieved subset.
 
@@ -58,7 +60,7 @@ SSE event types:
 | Model asked for data the schema lacks | `SQLDraft.unanswerable_reason` becomes a clarification message |
 | Pasted SQL is broken but the user asked to optimize or explain it | Rerouted to `debug_sql` first, and the UI says so |
 | Query times out or fails at runtime | SQL and explanation are still returned, along with the execution error |
-| Provider error (rate limit, auth, timeout) | SSE `error` event with a friendly message; the UI offers Retry |
+| Provider error (rate limit, auth, timeout) | Retried once on `LLM_FALLBACK_PROVIDER` if configured; otherwise, or if that also fails, an SSE `error` event with a friendly message, and the UI offers Retry |
 | Page reload during a request | Pending messages are marked interrupted when history is restored |
 
 ## Testing strategy
@@ -67,3 +69,4 @@ SSE event types:
 
 - **Unit:** validator cases (valid queries, every destructive form including writes in CTEs, unknown names, syntax, join rules), executor read-only enforcement and limits, guard patterns, retrieval, analyzer cost and index advice.
 - **Integration:** every graph path (generate, follow-up, self-correction, max attempts, destructive SQL from the model, refusals, guard-before-LLM, clarification, unanswerable, debug, optimize with equivalence, explain previous, execution off, schema questions) and the HTTP/SSE API including rate limiting.
+- **Provider configuration:** per-provider defaults, aliases and credentials, effort mapping for Gemini and Groq, and the fallback wrapper (a failing primary falls back for both structured and text calls; a healthy primary never touches the fallback).

@@ -10,7 +10,7 @@ Built with **LangGraph** (orchestration), **FastAPI** (API + SSE streaming), **R
 | **Demo video** | _link to the 3–5 minute walkthrough_ |
 | **Docs** | [Architecture](docs/ARCHITECTURE.md) · [Prompts](docs/PROMPTS.md) · [Sample schema](docs/SCHEMA.md) · [Demo script](docs/DEMO_SCRIPT.md) |
 
-> The free Render instance sleeps when idle; the first request can take ~30–50 s to wake it.
+> The free Render instance sleeps after 15 minutes idle; the first request can take about a minute to wake it. The demo runs on Groq's free tier with an automatic fallback to Gemini.
 
 ---
 
@@ -28,7 +28,7 @@ Built with **LangGraph** (orchestration), **FastAPI** (API + SSE streaming), **R
 | Out-of-scope refusal | Router classifies scope; fixed refusal text from the spec |
 | Ambiguity | Router or generator asks a clarifying question instead of guessing |
 
-**Bonus features implemented:** SQL execution (read-only, row cap, timeout) · follow-up support · query cost estimation from the SQLite query plan · syntax highlighting · SQLite / PostgreSQL / MySQL output · CSV export · download `.sql` · prompt-injection protection · dark mode · streaming responses · Docker deployment · 104 unit and integration tests.
+**Bonus features implemented:** SQL execution (read-only, row cap, timeout) · follow-up support · query cost estimation from the SQLite query plan · syntax highlighting · SQLite / PostgreSQL / MySQL output · CSV export · download `.sql` · prompt-injection protection · dark mode · resizable and collapsible panels · streaming responses · four LLM providers (Claude, OpenAI, Gemini, Groq) with automatic fallback to a second provider · Docker deployment on Render's free tier · 123 unit and integration tests.
 
 ---
 
@@ -48,7 +48,7 @@ flowchart LR
         X["Read-only executor<br/>mode=ro · query_only · authorizer"]
         DB[("Sample DB<br/>Acme Retail, SQLite")]
     end
-    LLM["LLM provider<br/>Claude (default) / OpenAI / Gemini / Groq"]
+    LLM["LLM provider<br/>Claude (default) / OpenAI / Gemini / Groq<br/>+ optional fallback provider"]
 
     UI -- "POST message, SSE events" --> API --> G
     G <--> CP
@@ -127,6 +127,7 @@ Destructive SQL has to get past four independent layers:
 - Each browser conversation has a UUID used as the LangGraph `thread_id`. The `AsyncSqliteSaver` checkpointer persists `messages` and `last_sql` between turns, and every other state field is reset per turn (`new_turn()`).
 - Prompts include the last 6 turns and the previous validated query. The router flags follow-ups (`refers_to_previous_sql`), so "Only those from California" modifies `SELECT * FROM Customers` instead of starting over, and "optimize it" or "explain that" act on the previous query.
 - The UI keeps the conversation list in `localStorage`. Deleting a conversation also deletes its server-side checkpoint.
+- The history sidebar and the query details panel can be resized by dragging their inner edge (double-click to reset, arrow keys when focused), and the ☰ button hides or shows the history sidebar. Widths and the collapsed state are remembered in `localStorage`.
 
 ---
 
@@ -201,7 +202,7 @@ backend/
       models.py          Pydantic structured-output schemas
       guards.py          Deterministic input guardrails
       retrieval.py       Schema retrieval (IDF scoring + FK path completion)
-      llm.py             Provider-agnostic model factory
+      llm.py             Provider-agnostic model factory and automatic provider fallback
     sql/
       validator.py       Read-only, schema, join and syntax validation
       analyzer.py        Formatting, cost estimate, index advice, dialect translation
@@ -212,7 +213,7 @@ backend/
       executor.py        Read-only SQLite execution
   scripts/generate_docs.py
   tests/                 Unit + integration tests with a scripted LLM
-frontend/src/            React + TypeScript UI
+frontend/src/            React + TypeScript UI (resizable, collapsible side panels)
 docs/                    Architecture, prompts, schema, demo script
 Dockerfile · docker-compose.yml · render.yaml
 ```
@@ -232,7 +233,7 @@ Some foreign keys are deliberately left unindexed (e.g. `Orders.OrderDate`, `Cus
 - **Index recommendations** are advice only; the assistant never runs DDL.
 - **Cost estimation** is a heuristic based on SQLite's query plan and index statistics, not a measured cost.
 - **Access:** the demo is public with no login, protected by per-IP rate limiting. Conversation checkpoints live on the container's disk and reset on redeploys of the free instance; the UI keeps its own history in the browser.
-- **Model:** Claude Opus 5.5 is the default. Set `LLM_MODEL=claude-sonnet-5-5` (or another provider) to trade some accuracy for cost.
+- **Model:** Claude Opus 5.5 is the code default. Set `LLM_MODEL=claude-sonnet-5-5` (or another provider) to trade some accuracy for cost. The free deployment uses Groq (`openai/gpt-oss-120b` for SQL, `openai/gpt-oss-20b` for routing and explanations) and falls back to Gemini (`gemini-3.8-flash` / `gemini-3.5-flash-lite`) when a Groq call fails. Groq's free tier allows about 8K tokens per minute per model, roughly 2–3 questions a minute.
 
 ## Limitations and next steps
 
